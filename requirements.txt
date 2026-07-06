@@ -3,3 +3,4 @@ python-dotenv
 mypy
 pytest
 black
+isort

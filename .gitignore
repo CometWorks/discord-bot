@@ -1,5 +1,9 @@
 .mypy_cache/
+.pytest_cache/
 __pycache__/
 .venv/
 .vscode/
 .env
+config.json
+logs/
+spam/

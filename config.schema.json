@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Discord bot configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "member_role",
+    "resistant_roles",
+    "immune_roles",
+    "spam_window_seconds",
+    "spam_channel_threshold",
+    "timeout_hours"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Editor hint pointing to this schema."
+    },
+    "member_role": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Role name assigned to new members."
+    },
+    "resistant_roles": {
+      "type": "array",
+      "description": "Role names that receive a timeout instead of a kick for spam.",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "immune_roles": {
+      "type": "array",
+      "description": "Role names ignored by spam punishment. Roles with administrator permissions are also immune.",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "log_channel_id": {
+      "type": ["integer", "null"],
+      "minimum": 1,
+      "description": "Optional Discord channel ID for spam punishment logs. Use null or omit it to disable Discord logging."
+    },
+    "spam_window_seconds": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Rolling spam detection window in seconds."
+    },
+    "spam_channel_threshold": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Number of different channels required to trigger spam punishment."
+    },
+    "timeout_hours": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Timeout length for resistant role spam punishment."
+    }
+  }
+}

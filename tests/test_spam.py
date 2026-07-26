@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
@@ -124,8 +125,15 @@ def test_same_image_counts_as_same_message() -> None:
     first = Message(author, "look", 1, ["https://example/image.png"])
     second = Message(author, "look", 2, ["https://example/image.png"])
 
-    assert asyncio.run(message_signature(first)) == asyncio.run(
-        message_signature(second)
+    signature = asyncio.run(message_signature(first))
+    assert signature == asyncio.run(message_signature(second))
+    assert (
+        signature
+        == hashlib.sha256(
+            len(b"look").to_bytes(8, "big")
+            + b"look"
+            + hashlib.sha256(b"image").digest()
+        ).hexdigest()[:16]
     )
 
 
@@ -453,13 +461,13 @@ def test_edge_overlapping_tracker_add_only_punishes_once(monkeypatch) -> None:
 def test_archive_spam_writes_flagged_messages(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(spam, "SPAM_DIR", tmp_path)
     author = Author(7, ["Member"])
-    messages = [Message(author, "spam", 1, ["https://example/image.png"])]
+    messages = [Message(author, " spam ", 1, ["https://example/image.png"])]
 
     path = asyncio.run(archive_spam(author, messages, "kick"))
 
     assert path.parent == tmp_path
-    assert len(path.name) == 8
-    assert (path / "message.txt").read_text(encoding="utf-8") == "spam"
+    assert path.name == asyncio.run(message_signature(messages[0]))
+    assert (path / "message.txt").read_text(encoding="utf-8") == " spam "
     assert (path / "image.png").read_bytes() == b"image"
 
 
@@ -536,7 +544,7 @@ def test_archive_spam_does_not_rewrite_existing_folder(tmp_path, monkeypatch) ->
     assert (path / "marker.txt").read_text(encoding="utf-8") == "keep"
 
 
-def test_archive_spam_hashes_attachment_bytes_not_cdn_urls(
+def test_archive_spam_hash_ignores_attachment_filenames_and_cdn_urls(
     tmp_path, monkeypatch
 ) -> None:
     monkeypatch.setattr(spam, "SPAM_DIR", tmp_path)
@@ -548,7 +556,7 @@ def test_archive_spam_hashes_attachment_bytes_not_cdn_urls(
     ]
     second = [
         Message(
-            author, "spam", 1, [("https://cdn.discordapp.com/b/image.png", b"same")]
+            author, "spam", 1, [("https://cdn.discordapp.com/b/other.png", b"same")]
         )
     ]
 
@@ -557,6 +565,24 @@ def test_archive_spam_hashes_attachment_bytes_not_cdn_urls(
 
     assert first_path == second_path
     assert (first_path / "image.png").read_bytes() == b"same"
+
+
+def test_archive_spam_hash_ignores_attachment_order(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(spam, "SPAM_DIR", tmp_path)
+    author = Author(7, ["Member"])
+    attachments: list[str | tuple[str, bytes]] = [
+        ("https://cdn.discordapp.com/a/image.png", b"first"),
+        ("https://cdn.discordapp.com/b/image.png", b"second"),
+    ]
+
+    first = asyncio.run(
+        archive_spam(author, [Message(author, "spam", 1, attachments)], "kick")
+    )
+    second = asyncio.run(
+        archive_spam(author, [Message(author, "spam", 1, attachments[::-1])], "kick")
+    )
+
+    assert first == second
 
 
 def test_text_log_line_references_spam_folder() -> None:

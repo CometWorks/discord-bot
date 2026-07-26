@@ -19,13 +19,13 @@ Use `config.schema.json` as the reference for `config.json`.
 
 When a member joins, the bot grants the role named by `member_role`.
 
-Spam detection compares message text and attachment contents. If one user posts the same message in enough different channels inside the configured window, the bot deletes the matched messages and kicks the user. If the user has a resistant role, the bot deletes the messages and times them out instead.
+Spam detection compares trimmed message text and attachment contents. It ignores attachment filenames and upload order. If one user posts the same message in enough different channels inside the configured window, the bot deletes the matched messages and kicks the user. If the user has a resistant role, the bot deletes the messages and times them out instead.
 
 Messages matching any case-insensitive regular expression in `spam_regex_patterns` trigger the same punishment immediately. Patterns use Python regular expression syntax; backslashes must be escaped in JSON, such as `"free\\s+nitro"`.
 
 Repeating a message in one channel is ignored. Posting different messages across channels is ignored.
 
-Spam punishments go to the console and the rotating `logs/info.log` file. The bot also archives flagged message text and attachments under `spam/<hash>/`. If `log_channel_id` is set, kick and mute logs are sent to that Discord channel.
+Spam punishments go to the console and the rotating `logs/info.log` file. The bot archives flagged message text and attachments under `spam/<hash>/`. Folder names use the same message signature: the first 64 bits of a SHA-256 hash over trimmed text and attachment contents. If `log_channel_id` is set, kick and mute logs are sent to that Discord channel.
 
 Run `python -m bot --help` for command-line options.
 

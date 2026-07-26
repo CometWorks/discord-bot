@@ -26,16 +26,23 @@ class SeenMessage:
     when: datetime
     user_id: int
     channel_id: int
-    signature: tuple[str, tuple[str, ...]]
+    signature: str
     message: Any
 
 
-async def message_signature(message: Any) -> tuple[str, tuple[str, ...]]:
-    attachments = []
-    for attachment in message.attachments:
-        data = await attachment.read()
-        attachments.append(hashlib.blake2s(data, digest_size=16).hexdigest())
-    return (message.content.strip(), tuple(sorted(attachments)))
+def message_hash(content: str, attachments: list[bytes]) -> str:
+    text = content.strip().encode("utf-8")
+    hasher = hashlib.sha256()
+    hasher.update(len(text).to_bytes(8, "big"))
+    hasher.update(text)
+    for digest in sorted(hashlib.sha256(data).digest() for data in attachments):
+        hasher.update(digest)
+    return hasher.hexdigest()[:16]
+
+
+async def message_signature(message: Any) -> str:
+    attachments = [await attachment.read() for attachment in message.attachments]
+    return message_hash(message.content, attachments)
 
 
 def role_names(member: Any) -> set[str]:
@@ -130,18 +137,14 @@ async def archive_spam(member: Any, messages: list[Any], punishment: str) -> Pat
         name = attachment_name(attachment)
         data = await attachment.read()
         images.append((name, data))
+    images.sort()
     images = list(
         zip(
             unique_attachment_names([name for name, _ in images]),
             [data for _, data in images],
         )
     )
-    hasher = hashlib.blake2s(digest_size=4)
-    hasher.update(text.encode("utf-8"))
-    for name, data in images:
-        hasher.update(name.encode("utf-8"))
-        hasher.update(data)
-    path = SPAM_DIR / hasher.hexdigest()
+    path = SPAM_DIR / message_hash(text, [data for _, data in images])
     if path.exists():
         return path
 

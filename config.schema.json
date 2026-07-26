@@ -7,6 +7,7 @@
     "member_role",
     "resistant_roles",
     "immune_roles",
+    "spam_regex_patterns",
     "spam_window_seconds",
     "spam_channel_threshold",
     "timeout_hours"
@@ -43,6 +44,15 @@
       "type": ["integer", "null"],
       "minimum": 1,
       "description": "Optional Discord channel ID for spam punishment logs. Use null or omit it to disable Discord logging."
+    },
+    "spam_regex_patterns": {
+      "type": "array",
+      "description": "Case-insensitive regular expressions that immediately trigger spam punishment when found in message text.",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
     },
     "spam_window_seconds": {
       "type": "integer",

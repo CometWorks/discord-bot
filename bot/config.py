@@ -18,6 +18,7 @@ class Config:
     resistant_roles: tuple[str, ...] = ()
     immune_roles: tuple[str, ...] = ()
     log_channel_id: int | None = None
+    spam_regex_patterns: tuple[str, ...] = ()
     spam_window_seconds: int = 180
     spam_channel_threshold: int = 3
     timeout_hours: int = 6
@@ -64,6 +65,7 @@ def load_config(path: str | Path = "config.json") -> Config:
         resistant_roles=_string_list(data, "resistant_roles"),
         immune_roles=_string_list(data, "immune_roles"),
         log_channel_id=log_channel_id,
+        spam_regex_patterns=_string_list(data, "spam_regex_patterns"),
         spam_window_seconds=data["spam_window_seconds"],
         spam_channel_threshold=data["spam_channel_threshold"],
         timeout_hours=data["timeout_hours"],

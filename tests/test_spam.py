@@ -4,6 +4,8 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
+import pytest
+
 from bot.cogs import spam
 from bot.cogs.spam import (
     SpamCog,
@@ -63,12 +65,10 @@ class Author:
         return self.name
 
     async def kick(self, reason: str) -> None:
-        self.kicked = reason == "Repeated cross-channel spam"
+        self.kicked = reason == "Spam detected"
 
     async def timeout(self, until: datetime, reason: str) -> None:
-        self.timed_out = (
-            until > datetime.now(UTC) and reason == "Repeated cross-channel spam"
-        )
+        self.timed_out = until > datetime.now(UTC) and reason == "Spam detected"
 
 
 class Message:
@@ -250,6 +250,117 @@ def test_spam_cog_uses_configured_channel_threshold() -> None:
     cog = SpamCog(Config(token="test", spam_channel_threshold=2), cast(Any, Client()))
 
     assert cog.tracker.threshold == 2
+
+
+def test_invalid_spam_regex_fails_at_startup() -> None:
+    config = Config(token="test", spam_regex_patterns=("(unclosed",))
+
+    with pytest.raises(RuntimeError, match="Invalid spam regex"):
+        SpamCog(config, cast(Any, Client()))
+
+
+def test_regex_spam_is_case_insensitive_and_immediate(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(spam, "SPAM_DIR", tmp_path)
+    author = Author(1, ["Member"])
+    config = Config(token="test", spam_regex_patterns=(r"free\s+nitro",))
+    message = Message(author, "Get FREE  NITRO now", 1)
+    cog = SpamCog(config, cast(Any, Client()))
+
+    asyncio.run(cog.on_message(cast(Any, message)))
+
+    assert author.kicked
+    assert message.deleted
+
+
+def test_nonmatching_regex_still_uses_channel_detection(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(spam, "SPAM_DIR", tmp_path)
+    author = Author(1, ["Member"])
+    config = Config(
+        token="test",
+        spam_regex_patterns=("blocked",),
+        spam_channel_threshold=2,
+    )
+    messages = [Message(author, "same", channel) for channel in [1, 2]]
+    cog = SpamCog(config, cast(Any, Client()))
+
+    for message in messages:
+        asyncio.run(cog.on_message(cast(Any, message)))
+
+    assert author.kicked
+    assert all(message.deleted for message in messages)
+
+
+def test_regex_punishment_clears_prior_channel_activity(monkeypatch) -> None:
+    author = Author(1, ["Member"])
+    config = Config(
+        token="test",
+        spam_regex_patterns=("blocked",),
+        spam_channel_threshold=2,
+    )
+    cog = SpamCog(config, cast(Any, Client()))
+    calls = 0
+
+    async def fake_punish(member, messages, config, dry_run=False):
+        nonlocal calls
+        calls += 1
+        return "kick"
+
+    async def fake_archive(member, messages, punishment):
+        return type("Archive", (), {"name": "abcd1234"})()
+
+    monkeypatch.setattr(spam, "punish_spammer", fake_punish)
+    monkeypatch.setattr(spam, "archive_spam", fake_archive)
+
+    async def run() -> None:
+        await cog.on_message(cast(Any, Message(author, "same", 1)))
+        await cog.on_message(cast(Any, Message(author, "blocked", 9)))
+        await cog.on_message(cast(Any, Message(author, "same", 2)))
+
+    asyncio.run(run())
+
+    assert calls == 1
+
+
+def test_channel_and_regex_overlap_only_punishes_once(monkeypatch) -> None:
+    author = Author(1, ["Member"])
+    config = Config(
+        token="test",
+        spam_regex_patterns=("blocked",),
+        spam_channel_threshold=2,
+    )
+    cog = SpamCog(config, cast(Any, Client()))
+    release = asyncio.Event()
+    calls = 0
+
+    async def fake_punish(member, messages, config, dry_run=False):
+        nonlocal calls
+        calls += 1
+        await release.wait()
+        return "kick"
+
+    async def fake_archive(member, messages, punishment):
+        return type("Archive", (), {"name": "abcd1234"})()
+
+    monkeypatch.setattr(spam, "punish_spammer", fake_punish)
+    monkeypatch.setattr(spam, "archive_spam", fake_archive)
+
+    async def run() -> Message:
+        await cog.on_message(cast(Any, Message(author, "same", 1)))
+        pending = asyncio.create_task(
+            cog.on_message(cast(Any, Message(author, "same", 2)))
+        )
+        await asyncio.sleep(0)
+
+        regex_message = Message(author, "blocked", 3)
+        await cog.on_message(cast(Any, regex_message))
+        release.set()
+        await pending
+        return regex_message
+
+    regex_message = asyncio.run(run())
+
+    assert calls == 1
+    assert regex_message.deleted
 
 
 def test_overlapping_spam_detection_only_punishes_once(monkeypatch) -> None:

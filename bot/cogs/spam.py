@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -46,6 +47,20 @@ def has_admin_role(member: Any) -> bool:
         getattr(getattr(role, "permissions", None), "administrator", False)
         for role in getattr(member, "roles", [])
     )
+
+
+def compile_spam_patterns(patterns: tuple[str, ...]) -> tuple[re.Pattern[str], ...]:
+    compiled = []
+    for pattern in patterns:
+        try:
+            compiled.append(re.compile(pattern, re.IGNORECASE))
+        except re.error as error:
+            raise RuntimeError(f"Invalid spam regex {pattern!r}: {error}") from error
+    return tuple(compiled)
+
+
+def matches_spam_pattern(content: str, patterns: tuple[re.Pattern[str], ...]) -> bool:
+    return any(pattern.search(content) for pattern in patterns)
 
 
 class SpamTracker:
@@ -188,10 +203,10 @@ async def punish_spammer(
 
     if punishment == "mute":
         until = datetime.now(UTC) + timedelta(hours=config.timeout_hours)
-        await member.timeout(until, reason="Repeated cross-channel spam")
+        await member.timeout(until, reason="Spam detected")
         return punishment
 
-    await member.kick(reason="Repeated cross-channel spam")
+    await member.kick(reason="Spam detected")
     return punishment
 
 
@@ -210,6 +225,7 @@ class SpamCog(commands.Cog):
         self.tracker = SpamTracker(
             timedelta(seconds=config.spam_window_seconds), config.spam_channel_threshold
         )
+        self.patterns = compile_spam_patterns(config.spam_regex_patterns)
         self._punishing: set[int] = set()
 
     async def _delete_if_punishing(self, message: discord.Message) -> bool:
@@ -228,7 +244,11 @@ class SpamCog(commands.Cog):
         if await self._delete_if_punishing(message):
             return
 
-        matches = await self.tracker.add(message)
+        matches = (
+            [message]
+            if matches_spam_pattern(message.content, self.patterns)
+            else await self.tracker.add(message)
+        )
         if not matches:
             return
 

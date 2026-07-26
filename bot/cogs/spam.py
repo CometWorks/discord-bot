@@ -118,6 +118,13 @@ def should_log_punishment(punishment: str, full_log: bool) -> bool:
     return punishment != "ignored" or full_log
 
 
+async def delete_message(message: Any) -> None:
+    try:
+        await message.delete()
+    except discord.NotFound:
+        pass
+
+
 def attachment_name(attachment: Any) -> str:
     name = Path(unquote(urlparse(getattr(attachment, "url", "")).path)).name
     return name or "attachment"
@@ -215,7 +222,7 @@ async def punish_spammer(
 
     spam_id = await message_signature(messages[0])
     for message in messages:
-        await message.delete()
+        await delete_message(message)
 
     if protection == SpamProtection.PARTIAL or punishment == "mute":
         until = datetime.now(UTC) + timedelta(hours=config.timeout_hours)
@@ -248,7 +255,7 @@ class SpamCog(commands.Cog):
         if message.author.id not in self._punishing:
             return False
         if self.protection != SpamProtection.NONE:
-            await message.delete()
+            await delete_message(message)
         return True
 
     @commands.Cog.listener()

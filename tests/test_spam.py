@@ -386,6 +386,52 @@ def test_edited_regex_spam_kick_references_archive(tmp_path, monkeypatch) -> Non
     )
 
 
+def test_edit_during_attachment_hash_does_not_cancel_punishment(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr(spam, "SPAM_DIR", tmp_path)
+
+    class MissingMessage(Exception):
+        pass
+
+    monkeypatch.setattr(spam.discord, "NotFound", MissingMessage)
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class BlockingAttachment(Attachment):
+        async def read(self) -> bytes:
+            if not started.is_set():
+                started.set()
+                await release.wait()
+            return self.data
+
+    class StrictMessage(Message):
+        async def delete(self) -> None:
+            if self.deleted:
+                raise MissingMessage
+            self.deleted = True
+
+    author = Author(1, ["Member"])
+    config = Config(token="test", spam_regex_patterns=("blocked",))
+    message = StrictMessage(author, "blocked", 1)
+    message.attachments = [BlockingAttachment("https://example/image.png")]
+    cog = SpamCog(config, cast(Any, Client()))
+
+    async def run() -> None:
+        pending = asyncio.create_task(cog.on_message(cast(Any, message)))
+        await started.wait()
+        await cog.on_raw_message_edit(
+            cast(Any, RawMessageUpdate(message, {"content": message.content}))
+        )
+        release.set()
+        await pending
+
+    asyncio.run(run())
+
+    assert author.kicked
+    assert message.deleted
+
+
 def test_nonmatching_regex_still_uses_channel_detection(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(spam, "SPAM_DIR", tmp_path)
     author = Author(1, ["Member"])

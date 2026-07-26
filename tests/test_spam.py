@@ -79,7 +79,9 @@ class Message:
         content: str,
         channel_id: int,
         attachments: list[str | tuple[str, bytes]] | None = None,
+        message_id: int | None = None,
     ) -> None:
+        self.id = message_id if message_id is not None else id(self)
         self.author = author
         self.content = content
         self.channel = Channel(channel_id)
@@ -95,6 +97,12 @@ class Message:
 
     async def delete(self) -> None:
         self.deleted = True
+
+
+class RawMessageUpdate:
+    def __init__(self, message: Message, data: dict[str, Any]) -> None:
+        self.message = message
+        self.data = data
 
 
 class LogChannel:
@@ -254,6 +262,21 @@ def test_different_messages_in_different_channels_are_not_spam() -> None:
     ]
 
 
+def test_edit_replaces_the_tracked_message() -> None:
+    author = Author(1, ["Member"])
+    tracker = SpamTracker(timedelta(minutes=3), threshold=2)
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+    original = Message(author, "old", 1, message_id=10)
+    edited = Message(author, "new", 1, message_id=10)
+
+    assert asyncio.run(tracker.add(original, now)) == []
+    assert asyncio.run(tracker.add(edited, now)) == []
+    assert asyncio.run(tracker.add(Message(author, "old", 2), now)) == []
+
+    matching = Message(author, "new", 2)
+    assert asyncio.run(tracker.add(matching, now)) == [edited, matching]
+
+
 def test_spam_cog_uses_configured_channel_threshold() -> None:
     cog = SpamCog(Config(token="test", spam_channel_threshold=2), cast(Any, Client()))
 
@@ -278,6 +301,31 @@ def test_regex_spam_is_case_insensitive_and_immediate(tmp_path, monkeypatch) -> 
 
     assert author.kicked
     assert message.deleted
+
+
+def test_edited_regex_spam_is_rescanned(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(spam, "SPAM_DIR", tmp_path)
+    author = Author(1, ["Member"])
+    config = Config(token="test", spam_regex_patterns=(r"free\s+nitro",))
+    cog = SpamCog(config, cast(Any, Client()))
+    original = Message(author, "hello", 1, message_id=10)
+    edited = Message(author, "FREE NITRO", 1, message_id=10)
+
+    async def run() -> None:
+        await cog.on_message(cast(Any, original))
+        await cog.on_raw_message_edit(
+            cast(Any, RawMessageUpdate(edited, {"embeds": []}))
+        )
+        assert not author.kicked
+        await cog.on_raw_message_edit(
+            cast(Any, RawMessageUpdate(edited, {"content": edited.content}))
+        )
+
+    asyncio.run(run())
+
+    assert author.kicked
+    assert edited.deleted
+    assert not original.deleted
 
 
 def test_nonmatching_regex_still_uses_channel_detection(tmp_path, monkeypatch) -> None:

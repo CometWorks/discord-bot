@@ -19,7 +19,7 @@ Use `config.schema.json` as the reference for `config.json`.
 
 When a member joins, the bot grants the role named by `member_role`.
 
-Spam detection compares trimmed message text and attachment contents. It ignores attachment filenames and upload order. If one user posts the same message in enough different channels inside the configured window, the bot deletes the matched messages and kicks the user. If the user has a resistant role, the bot deletes the messages and times them out instead.
+Spam detection scans new messages and edits. Only the latest version of each message counts, and an edit resets that message's detection window. Detection compares trimmed message text and attachment contents. It ignores attachment filenames and upload order. If one user posts the same message in enough different channels inside the configured window, the bot deletes the matched messages and kicks the user. If the user has a resistant role, the bot deletes the messages and times them out instead.
 
 Messages matching any case-insensitive regular expression in `spam_regex_patterns` trigger the same punishment immediately. Patterns use Python regular expression syntax; backslashes must be escaped in JSON, such as `"free\\s+nitro"`.
 

@@ -5,11 +5,11 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
-from collections import defaultdict, deque
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, DefaultDict, Deque
+from typing import Any
 from urllib.parse import unquote, urlparse
 
 import discord
@@ -74,19 +74,21 @@ class SpamTracker:
     def __init__(self, window: timedelta, threshold: int = 3) -> None:
         self.window = window
         self.threshold = threshold
-        self._messages: DefaultDict[int, Deque[SeenMessage]] = defaultdict(deque)
+        self._messages: defaultdict[int, list[SeenMessage]] = defaultdict(list)
 
     async def add(self, message: Any, now: datetime | None = None) -> list[Any]:
         now = now or datetime.now(UTC)
-        user_messages = self._messages[message.author.id]
         signature = await message_signature(message)
+        cutoff = now - self.window
+        user_messages = [
+            item
+            for item in self._messages[message.author.id]
+            if item.when >= cutoff and item.message.id != message.id
+        ]
+        self._messages[message.author.id] = user_messages
         user_messages.append(
             SeenMessage(now, message.author.id, message.channel.id, signature, message)
         )
-
-        cutoff = now - self.window
-        while user_messages and user_messages[0].when < cutoff:
-            user_messages.popleft()
 
         matches = [item for item in user_messages if item.signature == signature]
         if len({item.channel_id for item in matches}) >= self.threshold:
@@ -279,3 +281,8 @@ class SpamCog(commands.Cog):
         finally:
             self.tracker.clear(user_id)
             self._punishing.discard(user_id)
+
+    @commands.Cog.listener()
+    async def on_raw_message_edit(self, payload: discord.RawMessageUpdateEvent) -> None:
+        if "content" in payload.data or "attachments" in payload.data:
+            await self.on_message(payload.message)

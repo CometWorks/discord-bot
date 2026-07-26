@@ -10,6 +10,7 @@ import pytest
 from bot.cogs import spam
 from bot.cogs.spam import (
     SpamCog,
+    SpamProtection,
     SpamTracker,
     archive_spam,
     discord_log_message,
@@ -189,29 +190,51 @@ def test_resistant_spam_across_channels_is_timed_out_and_deleted() -> None:
     assert all(message.deleted for message in messages)
 
 
-def test_dry_run_kick_is_logged_but_not_applied() -> None:
+def test_none_protection_logs_kick_without_applying_it() -> None:
     author = Author(1, ["Member"])
     messages = [Message(author, "spam", channel) for channel in [1, 2, 3]]
 
-    assert asyncio.run(punish_spammer(author, messages, CONFIG, dry_run=True)) == "kick"
+    assert (
+        asyncio.run(punish_spammer(author, messages, CONFIG, SpamProtection.NONE))
+        == "kick"
+    )
     assert not author.kicked
     assert not any(message.deleted for message in messages)
 
 
-def test_dry_run_mute_is_logged_but_not_applied() -> None:
+def test_none_protection_logs_mute_without_applying_it() -> None:
     author = Author(1, ["Member", "Resistant"])
     messages = [Message(author, "spam", channel) for channel in [1, 2, 3]]
 
-    assert asyncio.run(punish_spammer(author, messages, CONFIG, dry_run=True)) == "mute"
+    assert (
+        asyncio.run(punish_spammer(author, messages, CONFIG, SpamProtection.NONE))
+        == "mute"
+    )
     assert not author.timed_out
     assert not any(message.deleted for message in messages)
 
 
-def test_immune_spam_has_no_effect() -> None:
+def test_partial_protection_logs_kick_but_applies_timeout() -> None:
+    author = Author(1, ["Member"])
+    messages = [Message(author, "spam", channel) for channel in [1, 2, 3]]
+
+    assert (
+        asyncio.run(punish_spammer(author, messages, CONFIG, SpamProtection.PARTIAL))
+        == "kick"
+    )
+    assert author.timed_out
+    assert not author.kicked
+    assert all(message.deleted for message in messages)
+
+
+def test_partial_protection_keeps_immune_users_immune() -> None:
     author = Author(1, ["Member", "Immune"])
     messages = [Message(author, "spam", channel) for channel in [1, 2, 3]]
 
-    assert asyncio.run(punish_spammer(author, messages, CONFIG)) == "ignored"
+    assert (
+        asyncio.run(punish_spammer(author, messages, CONFIG, SpamProtection.PARTIAL))
+        == "ignored"
+    )
     assert not author.kicked
     assert not author.timed_out
     assert not any(message.deleted for message in messages)
@@ -303,11 +326,11 @@ def test_regex_spam_is_case_insensitive_and_immediate(tmp_path, monkeypatch) -> 
     assert message.deleted
 
 
-def test_edited_regex_spam_is_rescanned(tmp_path, monkeypatch) -> None:
+def test_edited_regex_spam_uses_partial_protection(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(spam, "SPAM_DIR", tmp_path)
     author = Author(1, ["Member"])
     config = Config(token="test", spam_regex_patterns=(r"free\s+nitro",))
-    cog = SpamCog(config, cast(Any, Client()))
+    cog = SpamCog(config, cast(Any, Client()), SpamProtection.PARTIAL)
     original = Message(author, "hello", 1, message_id=10)
     edited = Message(author, "FREE NITRO", 1, message_id=10)
 
@@ -316,14 +339,15 @@ def test_edited_regex_spam_is_rescanned(tmp_path, monkeypatch) -> None:
         await cog.on_raw_message_edit(
             cast(Any, RawMessageUpdate(edited, {"embeds": []}))
         )
-        assert not author.kicked
+        assert not author.timed_out
         await cog.on_raw_message_edit(
             cast(Any, RawMessageUpdate(edited, {"content": edited.content}))
         )
 
     asyncio.run(run())
 
-    assert author.kicked
+    assert author.timed_out
+    assert not author.kicked
     assert edited.deleted
     assert not original.deleted
 
@@ -356,7 +380,7 @@ def test_regex_punishment_clears_prior_channel_activity(monkeypatch) -> None:
     cog = SpamCog(config, cast(Any, Client()))
     calls = 0
 
-    async def fake_punish(member, messages, config, dry_run=False):
+    async def fake_punish(member, messages, config, protection=SpamProtection.FULL):
         nonlocal calls
         calls += 1
         return "kick"
@@ -388,7 +412,7 @@ def test_channel_and_regex_overlap_only_punishes_once(monkeypatch) -> None:
     release = asyncio.Event()
     calls = 0
 
-    async def fake_punish(member, messages, config, dry_run=False):
+    async def fake_punish(member, messages, config, protection=SpamProtection.FULL):
         nonlocal calls
         calls += 1
         await release.wait()
@@ -425,7 +449,7 @@ def test_overlapping_spam_detection_only_punishes_once(monkeypatch) -> None:
     release = asyncio.Event()
     calls = 0
 
-    async def fake_punish(member, messages, config, dry_run=False):
+    async def fake_punish(member, messages, config, protection=SpamProtection.FULL):
         nonlocal calls
         calls += 1
         await release.wait()
@@ -472,7 +496,7 @@ def test_edge_overlapping_tracker_add_only_punishes_once(monkeypatch) -> None:
         def clear(self, user_id):
             pass
 
-    async def fake_punish(member, messages, config, dry_run=False):
+    async def fake_punish(member, messages, config, protection=SpamProtection.FULL):
         nonlocal calls
         calls += 1
         await release_punish.wait()

@@ -8,6 +8,7 @@ import re
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
@@ -19,6 +20,12 @@ from bot.config import Config
 from bot.logs import SPAM_DIR
 
 _LOGGER = logging.getLogger(__name__)
+
+
+class SpamProtection(StrEnum):
+    NONE = "None"
+    PARTIAL = "Partial"
+    FULL = "Full"
 
 
 @dataclass(frozen=True)
@@ -193,20 +200,23 @@ async def send_discord_log(
 
 
 async def punish_spammer(
-    member: Any, messages: list[Any], config: Config, dry_run: bool = False
+    member: Any,
+    messages: list[Any],
+    config: Config,
+    protection: SpamProtection = SpamProtection.FULL,
 ) -> str:
     names = role_names(member)
     if has_admin_role(member) or names & set(config.immune_roles):
         return "ignored"
 
     punishment = "mute" if names & set(config.resistant_roles) else "kick"
-    if dry_run:
+    if protection == SpamProtection.NONE:
         return punishment
 
     for message in messages:
         await message.delete()
 
-    if punishment == "mute":
+    if protection == SpamProtection.PARTIAL or punishment == "mute":
         until = datetime.now(UTC) + timedelta(hours=config.timeout_hours)
         await member.timeout(until, reason="Spam detected")
         return punishment
@@ -220,12 +230,12 @@ class SpamCog(commands.Cog):
         self,
         config: Config,
         client: discord.Client,
-        dry_run: bool = False,
+        protection: SpamProtection = SpamProtection.FULL,
         full_log: bool = False,
     ) -> None:
         self.config = config
         self.client = client
-        self.dry_run = dry_run
+        self.protection = protection
         self.full_log = full_log
         self.tracker = SpamTracker(
             timedelta(seconds=config.spam_window_seconds), config.spam_channel_threshold
@@ -236,7 +246,7 @@ class SpamCog(commands.Cog):
     async def _delete_if_punishing(self, message: discord.Message) -> bool:
         if message.author.id not in self._punishing:
             return False
-        if not self.dry_run:
+        if self.protection != SpamProtection.NONE:
             await message.delete()
         return True
 
@@ -263,7 +273,7 @@ class SpamCog(commands.Cog):
         self._punishing.add(user_id)
         try:
             punishment = await punish_spammer(
-                message.author, matches, self.config, self.dry_run
+                message.author, matches, self.config, self.protection
             )
             if not should_log_punishment(punishment, self.full_log):
                 return

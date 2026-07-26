@@ -4,6 +4,7 @@ import discord
 from discord.ext import commands
 
 from bot.client import create_bot
+from bot.cogs.spam import SpamProtection
 from bot.config import Config
 
 
@@ -14,10 +15,10 @@ def test_bot_uses_client_not_command_bot() -> None:
     assert not isinstance(client, commands.Bot)
 
 
-def test_bot_accepts_spam_dry_run() -> None:
-    client = create_bot(Config(token="test"), spam_dry_run=True)
+def test_bot_accepts_spam_protection() -> None:
+    client = create_bot(Config(token="test"), SpamProtection.PARTIAL)
 
-    assert getattr(client, "spam_dry_run") is True
+    assert getattr(client, "spam_protection") == SpamProtection.PARTIAL
 
 
 def test_bot_accepts_spam_full_log() -> None:

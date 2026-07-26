@@ -19,11 +19,7 @@ def parse_args() -> Namespace:
         type=SpamProtection,
         choices=SpamProtection,
         default=SpamProtection.FULL,
-        help=(
-            "Spam punishment level: None only logs, Partial logs the normal "
-            "punishment but deletes messages and times out users, and Full applies "
-            "the normal punishment."
-        ),
+        help="Override the punishment severity when detecting spam.",
     )
     parser.add_argument(
         "--spam-full-log",

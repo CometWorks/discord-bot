@@ -1,37 +1,61 @@
 # Discord bot
 
-A small `discord.py` bot for one server. It gives new members a role and watches for repeated cross-channel spam and configured spam text patterns.
+A small `discord.py` bot built for a single server. It assigns a role to new
+members and handles repeated cross-channel spam.
+
+## What it does
+
+- Assigns a configured role when a member joins.
+- Detects users who repeat the same text or attachments across several channels.
+- Matches message text against configurable, case-insensitive regular expressions.
+- Kicks spammers by default. Members with a resistant role are timed out instead.
+- Ignores members with an immune role or administrator permission.
+- Logs punishments and archives the detected message under `spam/`.
+
+## Requirements
+
+- Python 3.11 or newer
+- A Discord bot with the Server Members Intent and Message Content Intent enabled
+- Permission to manage roles, messages, timeouts, and kicks in the server
+
+The bot's role must sit above the member role and any members it may punish.
 
 ## Setup
 
-1. Install Python dependencies: `pip install -r requirements.txt`
-2. Create `.env` with `DISCORD_TOKEN=your-token`
-3. Create `config.json`. Use `config.schema.json` for editor validation.
-4. Run the bot: `python -m bot`
+Create a virtual environment and install the dependencies:
 
-The bot needs the member intent and message content intent enabled in the Discord developer portal.
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
 
-## Config
+Create `.env` with the bot token:
 
-Use `config.schema.json` as the reference for `config.json`.
+```dotenv
+DISCORD_TOKEN=your-token
+```
 
-## Behavior
+Create `config.json` in the project root using `config.schema.json` as the
+reference. The schema documents every setting and provides editor validation.
+Set `log_channel_id` to `null` to disable Discord logging.
 
-When a member joins, the bot grants the role named by `member_role`.
+Start the bot from the project root:
 
-Spam detection scans new messages and edits. Only the latest version of each message counts, and an edit resets that message's detection window. Detection compares trimmed message text and attachment contents. It ignores attachment filenames and upload order. If one user posts the same message in enough different channels inside the configured window, the bot deletes the matched messages and kicks the user. If the user has a resistant role, the bot deletes the messages and times them out instead.
+```bash
+python -m bot
+```
 
-Messages matching any case-insensitive regular expression in `spam_regex_patterns` trigger the same punishment immediately. Patterns use Python regular expression syntax; backslashes must be escaped in JSON, such as `"free\\s+nitro"`.
+Repeated-message detection compares trimmed text and attachment contents. Repeats
+in one channel do not trigger it. Editing a message replaces its previous entry in
+the detection window.
 
-Repeating a message in one channel is ignored. Posting different messages across channels is ignored.
+Run `python -m bot --help` to see the dry-run, partial-punishment, and immune-user
+logging options.
 
-Spam punishments go to the console and the rotating `logs/info.log` file. The bot archives flagged message text and attachments under `spam/<hash>/`. Folder names use the same message signature: the first 64 bits of a SHA-256 hash over trimmed text and attachment contents. If `log_channel_id` is set, kick and mute logs are sent to that Discord channel.
+## Development
 
-Run `python -m bot --help` for command-line options.
-
-## Checks
-
-Run these before handing off changes:
+Run the checks with the virtual environment active:
 
 ```bash
 pytest

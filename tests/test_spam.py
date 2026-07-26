@@ -61,16 +61,20 @@ class Author:
         admin_roles = admin_roles or set()
         self.roles = [Role(role, role in admin_roles) for role in roles]
         self.kicked = False
+        self.kick_reason: str | None = None
         self.timed_out = False
+        self.timeout_reason: str | None = None
 
     def __str__(self) -> str:
         return self.name
 
     async def kick(self, reason: str) -> None:
-        self.kicked = reason == "Spam detected"
+        self.kicked = True
+        self.kick_reason = reason
 
     async def timeout(self, until: datetime, reason: str) -> None:
-        self.timed_out = until > datetime.now(UTC) and reason == "Spam detected"
+        self.timed_out = until > datetime.now(UTC)
+        self.timeout_reason = reason
 
 
 class Message:
@@ -170,8 +174,10 @@ def test_member_spam_across_channels_is_kicked_and_deleted() -> None:
     for message in messages:
         matches = asyncio.run(tracker.add(message, now))
 
+    spam_id = asyncio.run(message_signature(matches[0]))
     assert asyncio.run(punish_spammer(author, matches, CONFIG)) == "kick"
     assert author.kicked
+    assert author.kick_reason == f"Spam detected: {spam_id}"
     assert all(message.deleted for message in messages)
 
 
@@ -185,8 +191,10 @@ def test_resistant_spam_across_channels_is_timed_out_and_deleted() -> None:
     for message in messages:
         matches = asyncio.run(tracker.add(message, now))
 
+    spam_id = asyncio.run(message_signature(matches[0]))
     assert asyncio.run(punish_spammer(author, matches, CONFIG)) == "mute"
     assert author.timed_out
+    assert author.timeout_reason == f"Spam detected: {spam_id}"
     assert all(message.deleted for message in messages)
 
 
@@ -217,12 +225,14 @@ def test_none_protection_logs_mute_without_applying_it() -> None:
 def test_partial_protection_logs_kick_but_applies_timeout() -> None:
     author = Author(1, ["Member"])
     messages = [Message(author, "spam", channel) for channel in [1, 2, 3]]
+    spam_id = asyncio.run(message_signature(messages[0]))
 
     assert (
         asyncio.run(punish_spammer(author, messages, CONFIG, SpamProtection.PARTIAL))
         == "kick"
     )
     assert author.timed_out
+    assert author.timeout_reason == f"Spam detected: {spam_id}"
     assert not author.kicked
     assert all(message.deleted for message in messages)
 
@@ -350,6 +360,30 @@ def test_edited_regex_spam_uses_partial_protection(tmp_path, monkeypatch) -> Non
     assert not author.kicked
     assert edited.deleted
     assert not original.deleted
+
+
+def test_edited_regex_spam_kick_references_archive(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(spam, "SPAM_DIR", tmp_path)
+    author = Author(1, ["Member"])
+    config = Config(token="test", spam_regex_patterns=(r"free\s+nitro",))
+    cog = SpamCog(config, cast(Any, Client()))
+    original = Message(author, "hello", 1, message_id=10)
+    edited = Message(author, "FREE NITRO", 1, message_id=10)
+
+    async def run() -> str:
+        await cog.on_message(cast(Any, original))
+        spam_id = await message_signature(edited)
+        await cog.on_raw_message_edit(
+            cast(Any, RawMessageUpdate(edited, {"content": edited.content}))
+        )
+        return spam_id
+
+    spam_id = asyncio.run(run())
+
+    assert author.kick_reason == f"Spam detected: {spam_id}"
+    assert (tmp_path / spam_id / "message.txt").read_text(encoding="utf-8") == (
+        "FREE NITRO"
+    )
 
 
 def test_nonmatching_regex_still_uses_channel_detection(tmp_path, monkeypatch) -> None:

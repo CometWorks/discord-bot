@@ -213,15 +213,16 @@ async def punish_spammer(
     if protection == SpamProtection.NONE:
         return punishment
 
+    spam_id = await message_signature(messages[0])
     for message in messages:
         await message.delete()
 
     if protection == SpamProtection.PARTIAL or punishment == "mute":
         until = datetime.now(UTC) + timedelta(hours=config.timeout_hours)
-        await member.timeout(until, reason="Spam detected")
+        await member.timeout(until, reason=f"Spam detected: {spam_id}")
         return punishment
 
-    await member.kick(reason="Spam detected")
+    await member.kick(reason=f"Spam detected: {spam_id}")
     return punishment
 
 
